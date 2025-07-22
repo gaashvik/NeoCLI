@@ -1,0 +1,4 @@
+bash-src/
+*.pyc
+__pycache__/
+bash-build/
