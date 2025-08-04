@@ -1,11 +1,11 @@
-from agent import run_agent_goal
-from configuration import config
+from .agent import run_agent_goal
+from .configuration import config
 from prompt_toolkit import PromptSession
 from langchain.schema import AgentAction, AgentFinish
 from langchain.agents.agent import AgentExecutor
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
-from tools import tools
+from .tools import tools
 import os
 
 # Persistent file path

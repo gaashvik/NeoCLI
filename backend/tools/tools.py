@@ -1,6 +1,6 @@
 from langchain.tools import Tool
-from helpers import agent_helpers
-from models import session
+from ..helpers import agent_helpers
+from ..models import session
 
 session = session.ai_shell()
 

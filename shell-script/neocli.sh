@@ -8,20 +8,43 @@ enforce_histfile_size() {
     tail -n "${HISTFILESIZE:-500}" "$HISTFILE" > "${HISTFILE}.tmp" && mv "${HISTFILE}.tmp" "$HISTFILE"
 }
 function neo() {
-        local meta_dir=$(search_for_metadata_dir)
-        if [[ -n "$meta_dir" ]]; then
-            echo "Found .neocli file at: $meta_dir"
-        else
-            echo "Could not find metadata file."
+   local subcommand=$1
+    shift
+    local meta_dir
+    meta_dir=$(search_for_metadata_dir)
+
+    if [[ -n "$meta_dir" ]]; then
+        echo "Found .neocli file at: $meta_dir"
+    else
+        if [[ "$subcommand" != "init" && -n "$subcommand" ]]; then
+            echo "Could not find metadata file. Please initialize the neo file."
             return 1
         fi
-        local subcommand=$1
-        shift
+    fi
         # local global_hist="$HISTFILE"
         # echo "$HISTFILE"
         # local local_hist="$PWD/.neocli/.neocli_history"
         # export HISTFILE="$local_hist"
         case "$subcommand" in 
+        init)
+
+    if [[ -z "$1" ]]; then
+    echo "❌ Project name is required. Usage: aicopilot init <project-name>"
+    return 1
+    fi
+    local name=$1
+    shift
+    local root=".neocli"
+    mkdir -p "$root/chroma"
+    touch "$root/.neocli_history" "$root/session.json" "$root/memory.jsonl" "$root/config.json"
+cat <<EOF > "$root/config.json"
+{
+  "project": "$name",
+  "version": "0.1.0"
+}
+EOF
+;;
+
 
         shell)
         # history -a
@@ -49,7 +72,7 @@ function neo() {
         #     local out=$( eval "$cmd" )
         #     echo $out
         # done
-        python "$MAIN_SCRIPT" "$meta_dir"
+        PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.main "$meta_dir"
 
     ;;
 
@@ -63,24 +86,7 @@ function neo() {
       echo "  help        Show this message"
     ;;
 
-    init)
-
-    if [[ -z "$1" ]]; then
-    echo "❌ Project name is required. Usage: aicopilot init <project-name>"
-    return 1
-    fi
-    local name=$1
-    shift
-    local root=".neocli"
-    mkdir -p "$root/chroma"
-    touch "$root/.neocli_history" "$root/session.json" "$root/memory.jsonl" "$root/config.json"
-cat <<EOF > "$root/config.json"
-{
-  "project": "$name",
-  "version": "0.1.0"
-}
-EOF
-;;
+   
     index)
     PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.services.index_codebase "$meta_dir"
     ;;
