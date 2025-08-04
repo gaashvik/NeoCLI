@@ -47,39 +47,14 @@ EOF
 
 
         shell)
-        # history -a
-        # local global_hist="$HISTFILE"
-        # echo "$HISTFILE"
-        # local local_hist="$meta_dir/.neocli/.neocli_history"
-        # touch "$local_hist"
-        # export HISTFILE="$local_hist"
-        # echo "$HISTFILE"
-        # history -s "#dummy"
-        # history -r
-        # echo "🚀 Starting aicopilot REPL (manual mode)..."
-        # while true; do
-        #     read -e -p "aicopilot> " cmd
-        #     if [[ "$cmd" == "exit" ]]; then
-        #         history -s "$cmd"
-        #         history -a
-        #         enforce_histfile_size
-        #         export HISTFILE="$global_hist"
-        #         echo "$HISTFILE"
-        #         break
-        #     fi
-
-        #     history -s "$cmd"
-        #     local out=$( eval "$cmd" )
-        #     echo $out
-        # done
-        PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.main "$meta_dir"
+        PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.main "$meta_dir" 
 
     ;;
 
     help|"")
 
     echo "Usage: aicopilot <command>"
-      echo "Commands:"
+      echo "Commands:" 
       echo "  init        Initialize .aicopilot in this project"
       echo "  index       Build or rebuild the vector index"
       echo "  shell       Start interactive REPL"

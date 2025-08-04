@@ -1,8 +1,8 @@
 import sqlite3
 from typing import List, Optional
+from ..configuration import config
 
-ROOT_DIR = "/home/shubhk/sentinal-ai"
-DB_PATH = ROOT_DIR + "/.neocli/chroma/metadata.db"
+DB_PATH = config.META_DIR + "/.neocli/chroma/metadata.db"
 
 class MetadataDB:
     def __init__(self, db_path=DB_PATH):
