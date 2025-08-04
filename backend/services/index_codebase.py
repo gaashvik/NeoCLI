@@ -6,15 +6,14 @@ import tree_sitter_python
 import numpy as np
 import tree_sitter_javascript
 from huggingface_hub import InferenceClient
-from configuration import config
+from ..configuration import config
 import faiss
-from metadata import MetadataDB
-CODE_DIR = '/home/shubhk/sentinal-ai/'
-ROOT_DIR ='/home/shubhk/sentinal-ai/.neocli/chroma'
+from .metadata import MetadataDB
+DATA_DIR =f'{config.META_DIR}/.neocli/chroma'
 CHUNK_SIZE = 20
 MODEL_NAME= "BAAI/bge-large-en-v1.5"
 
-os.makedirs(ROOT_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 db = MetadataDB()
 
@@ -41,7 +40,7 @@ for ext,lang in LANGUAGE_GRAMMERS.items():
     parser=Parser(lang)
     parsers[ext]=parser
 
-INDEX_FILE_PATH=ROOT_DIR+"/faiss.index"
+INDEX_FILE_PATH=DATA_DIR+"/faiss.index"
 embedding_dim = 1024  # intfloat/e5-small-v2
 if os.path.exists(INDEX_FILE_PATH):
     index = faiss.read_index(INDEX_FILE_PATH)
@@ -60,7 +59,7 @@ def embed(text):
 
 
 seen_hashes={}
-HASH_FILE_PATH=ROOT_DIR+"/hashes.json"
+HASH_FILE_PATH=DATA_DIR+"/hashes.json"
 
 if os.path.exists(HASH_FILE_PATH):
     with open(HASH_FILE_PATH) as f:
@@ -87,7 +86,7 @@ def extracts_chunks(source_code, parser, chunk_types):
 EXCLUDE_DIRS = {".venv", ".git", "__pycache__", "node_modules", "dist", "build", ".mypy_cache"}
 def find_and_show_chunks():
     
-    for root,dirs,files in os.walk(CODE_DIR):
+    for root,dirs,files in os.walk(config.META_DIR):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
         for fname in files:
             ext=os.path.splitext(fname)[1]
@@ -143,5 +142,5 @@ def find_and_show_chunks():
 
 
 if __name__ == "__main__":
-    print(f"Extracting chunks from: {CODE_DIR}")
+    print(f"Extracting chunks from: {config.META_DIR}")
     find_and_show_chunks()

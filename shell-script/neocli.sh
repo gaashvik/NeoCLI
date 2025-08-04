@@ -1,6 +1,7 @@
 # In main.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_SCRIPT="$(realpath "$SCRIPT_DIR/../backend/main.py")"
+ENTERY_SCRIPT="$(realpath "$SCRIPT_DIR/../backend/main.py")"
+INDEX_SCRIPT="$(realpath "$SCRIPT_DIR/../backend.services.index_codebase")"
 source "$SCRIPT_DIR/helper.sh"
 
 enforce_histfile_size() {
@@ -48,8 +49,7 @@ function neo() {
         #     local out=$( eval "$cmd" )
         #     echo $out
         # done
-        PYTHON_SCRIPT="$(realpath "$SCRIPT_DIR/../backend/main.py")"
-        python "$PYTHON_SCRIPT" "$meta_dir"
+        python "$MAIN_SCRIPT" "$meta_dir"
 
     ;;
 
@@ -81,6 +81,9 @@ cat <<EOF > "$root/config.json"
 }
 EOF
 ;;
+    index)
+    PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.services.index_codebase "$meta_dir"
+    ;;
     *)
 
     echo "Command not found"
