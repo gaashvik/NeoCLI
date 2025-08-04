@@ -3,5 +3,6 @@ bash-src/
 __pycache__/
 bash-build/
 **/*.venv/
-
+.vscode/
+.neocli/
 .env
