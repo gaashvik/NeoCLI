@@ -1,11 +1,11 @@
-from .agent import run_agent_goal
 from .configuration import config
 from prompt_toolkit import PromptSession
-from langchain.schema import AgentAction, AgentFinish
-from langchain.agents.agent import AgentExecutor
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
-from .tools import tools
+from langchain_core.messages import HumanMessage
+from .UI import terminal
+from .core.agent import workflow
+from .core.tools import shell
 import os
 
 # Persistent file path
@@ -17,7 +17,7 @@ try:
         for line in f:
             clean_line = line.strip()
             if clean_line:
-                tools.session.mem_history.append_string(clean_line)
+                shell.mem_history.append_string(clean_line)
                 loaded_history_lines+=1
 except FileNotFoundError:
     pass
@@ -27,7 +27,7 @@ completer = WordCompleter(
     ignore_case=True
 )
 session = PromptSession(
-    history=tools.session.mem_history,
+    history=shell.mem_history,
     auto_suggest=AutoSuggestFromHistory(),
     completer=completer,
     enable_history_search=True
@@ -44,38 +44,13 @@ def repl():
                 print("👋 Exiting...")
                 break
 
-            intermediate_steps = []
+            
 
-            while True:
-                print("⚙️ Agent thinking...")
-                plan = run_agent_goal(
-                    user_input,
-                    dry_run=True,
-                    intermediate_steps=intermediate_steps
-                )
-
-                if isinstance(plan, AgentFinish):
-                    print("✅ Final answer:", plan.return_values['output'])
-                    break
-
-                print(f"\n🤖 Agent proposes tool: {plan.tool}")
-                print(f"🧾 Input: {plan.tool_input}")
-
-                approval = input("✅ Proceed? (y/n): ").strip().lower()
-                if approval != 'y':
-                    print("⏹️ Tool execution cancelled.")
-                    break  # or continue, if you want agent to try another plan
-
-                result = run_agent_goal(
-                    user_input,
-                    plan=plan,
-                    intermediate_steps=intermediate_steps
-                )
-
-                print(f"🔍 Tool result: {result}")
-
-                # Store this tool step in the agent’s state
-                intermediate_steps.append((plan, result))
+            messages = [HumanMessage(content=user_input)]
+            thread_config = {"configurable": {"thread_id": "some_id"}}
+            input_state = {"messages": messages}
+            terminal.stream_workflow(input_state,thread_config,workflow)
+            
 
         except KeyboardInterrupt:
             print("\n⏹️ Interrupted.")
@@ -87,7 +62,7 @@ def repl():
 
     # Save history
     try:
-        all_entries = tools.session.mem_history.get_strings()
+        all_entries = shell.mem_history.get_strings()
         new_entries = all_entries[loaded_history_lines:]
         with open(history_file, 'a') as f:
             for entry in new_entries:

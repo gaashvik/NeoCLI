@@ -1,7 +1,8 @@
 import faiss
-from metadata import MetadataDB
+from backend.models.metadata import MetadataDB
 from huggingface_hub import InferenceClient
 from configuration import config
+import numpy as np
 db=MetadataDB()
 
 MODEL_NAME= "BAAI/bge-large-en-v1.5"

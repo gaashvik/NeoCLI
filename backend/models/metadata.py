@@ -50,6 +50,7 @@ class MetadataDB:
         print(query)
         print(vector_list.tolist())
         cur = self.conn.execute(query, vector_list.tolist())
+        print("made it here even")
         return cur.fetchall()
     def close(self):
         print("[DB] Closing connection.")

@@ -8,7 +8,7 @@ import tree_sitter_javascript
 from huggingface_hub import InferenceClient
 from ..configuration import config
 import faiss
-from .metadata import MetadataDB
+from ..models.metadata import MetadataDB
 DATA_DIR =f'{config.META_DIR}/.neocli/chroma'
 CHUNK_SIZE = 20
 MODEL_NAME= "BAAI/bge-large-en-v1.5"
@@ -71,6 +71,11 @@ def hash_file(path):
     
     
 def extracts_chunks(source_code, parser, chunk_types):
+    """
+    Parses the given source code using the provided parser and extracts code chunks.
+    It traverses the Abstract Syntax Tree (AST) and identifies segments matching
+    the specified chunk types, returning the code, start, and end line numbers.
+    """
     tree =  parser.parse(source_code.encode("utf8"))
     root = tree.root_node
     chunks = []
@@ -83,8 +88,14 @@ def extracts_chunks(source_code, parser, chunk_types):
             walk(child)
     walk(root)
     return chunks
-EXCLUDE_DIRS = {".venv", ".git", "__pycache__", "node_modules", "dist", "build", ".mypy_cache"}
+EXCLUDE_DIRS = {".venv", ".git", "__pycache__", "node_modules", "dist", "build", ".mypy_cache","test"}
 def find_and_show_chunks():
+    """
+    Orchestrates the codebase indexing process. It walks through the configured
+    directories, identifies relevant files, extracts code chunks using `extracts_chunks`,
+    generates embeddings for each chunk, and stores them in a FAISS index and a database.
+    It also handles updates for modified files and persists the indexing state.
+    """
     
     for root,dirs,files in os.walk(config.META_DIR):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]

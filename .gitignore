@@ -6,3 +6,4 @@ bash-build/
 .vscode/
 .neocli/
 .env
+test/
