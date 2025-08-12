@@ -33,7 +33,7 @@ session = PromptSession(
     enable_history_search=True
 )
 def repl():
-    print("\n🤖 AI Shell Copilot (Approval Mode)")
+    print("\n AI Shell Copilot (Approval Mode)")
     print("Type ':exit' to quit\n")
 
     while True:
