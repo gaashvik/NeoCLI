@@ -10,6 +10,7 @@ agent_builder = StateGraph(MessagesState)
 
 agent_builder.add_node("llm_call", nodes.llm_call)
 agent_builder.add_node("environment", nodes.tool_node)
+agent_builder.add_node("hello",nodes.tool_node)
 
 
 
