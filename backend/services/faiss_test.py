@@ -1,5 +1,5 @@
 import faiss
-from backend.models.metadata import MetadataDB
+from backend.models.index_metadata import MetadataDB
 from huggingface_hub import InferenceClient
 from configuration import config
 import numpy as np

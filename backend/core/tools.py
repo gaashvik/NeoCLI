@@ -1,5 +1,5 @@
 import faiss
-from ..models import metadata
+from ..models import index_metadata
 from huggingface_hub import InferenceClient
 import numpy as np
 from ..models import session
@@ -19,7 +19,7 @@ client = InferenceClient(
 @tool
 def retrieve_context(promt:str):
     '''used to search and return contextual infromation from codebase about project. use ONLY! if users ask project related questions. else use your own knowledge'''
-    db=metadata.MetadataDB()
+    db=index_metadata.MetadataDB()
     def embed(text):
         """Use HF SDK to embed text"""
         try:
