@@ -4,14 +4,22 @@ from rich.panel import Panel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage,ToolMessage
 import sys
 from langgraph.types import  Command
-
+from ..configuration import config
+import traceback
 
 console = Console()
 
 
-
 def normalize_message_content(content):
-    """Ensure message content is always a single string for Rich printing."""
+    """
+    Ensure message content is always a single string for Rich printing.
+
+    Args:
+        content: The message content, which could be a string or a list of dictionaries.
+
+    Returns:
+        str: The normalized message content as a single string.
+    """
     if isinstance(content, list):
         # Join all elements into a single string
         return "\n".join(
@@ -22,6 +30,12 @@ def normalize_message_content(content):
 
 
 def rich_pretty_print_message(msg):
+    """
+    Pretty prints a message to the console using Rich library for enhanced formatting.
+
+    Args:
+        msg: The message object (can be HumanMessage, AIMessage, SystemMessage, ToolMessage, or other).
+    """
     is_tool=False
     if isinstance(msg, HumanMessage):
         sender = "[bold green]Human"
@@ -44,6 +58,7 @@ def rich_pretty_print_message(msg):
         user_question=(f"""
 ### 🛠️ Shell Command Execution
 \n\n
+
 You are about to run the following command via `{function_details.get('name')}`:
 
 ```bash
@@ -64,13 +79,22 @@ Do you want to proceed? (y/n)
 
 
 def stream_workflow(input_state,thread_config,workflow):
+    """
+    Streams the workflow execution, printing messages and handling tool call interruptions.
+
+    Args:
+        input_state: The initial state for the workflow.
+        thread_config: Configuration for the workflow thread.
+        workflow: The workflow object to be streamed.
+    """
     try:
         events = workflow.stream(input_state, config=thread_config, stream_mode="values")
         for event in events:
                     for key, value in event.items():
                                 rich_pretty_print_message(value[-1])
     except Exception as e:
-        logger.exception("Workflow failed")
+        print("Workflow failed",e)
+        traceback.print_exc()
         sys.exit(1)
 
 
@@ -110,3 +134,6 @@ def stream_workflow(input_state,thread_config,workflow):
         snapshot = workflow.get_state(thread_config)
         # message=snapshot.values.get("messages")[-1]
         # message.pretty_print()
+
+if __name__ == "__main__":
+     stream_workflow("msg",None,None)

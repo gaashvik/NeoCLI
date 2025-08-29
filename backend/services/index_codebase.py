@@ -8,7 +8,7 @@ import tree_sitter_javascript
 from huggingface_hub import InferenceClient
 from ..configuration import config
 import faiss
-from ..models.metadata import MetadataDB
+from ..models.index_metadata import MetadataDB
 DATA_DIR =f'{config.META_DIR}/.neocli/chroma'
 CHUNK_SIZE = 20
 MODEL_NAME= "BAAI/bge-large-en-v1.5"
@@ -130,7 +130,7 @@ def find_and_show_chunks():
                 continue
             print(f"Indexing {fname} ({len(chunks)} chunks)")
             for code_chunk, start, end in chunks:
-                emb = embed(code_chunk)
+                emb = embed(f"FilePath:{file_path},code:"+code_chunk)
                 if emb is None:
                     print(f"Couldn't create emebedding for chunk of file path-:{file_path}")
                     continue
