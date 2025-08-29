@@ -213,7 +213,6 @@ def read_file(relative_path: str) -> str:
     return content
 
 @tool
-
 def git_diff(files: List[str], repo_dir: str = ".") -> str:
     """
     Generate a git diff for a list of files using GitPython. Tool is required as git dif via git command in terminal is not feasible
@@ -240,7 +239,7 @@ def git_diff(files: List[str], repo_dir: str = ".") -> str:
 
 
 tool_list=[interupt.add_human_in_the_loop(run_shell_command),retrieve_context,generate_pr_title_and_description,interupt.add_human_in_the_loop(create_pr),web_crawl_based_on_url,web_search_based_on_query,interupt.add_human_in_the_loop(file_creator),interupt.add_human_in_the_loop(update_file),read_file,git_diff]
-
+error_tool_list=[retrieve_context]
 if __name__ == "__main__":
     print(web_crawl_based_on_url("https://langchain-ai.github.io/langgraph/","Fetch results for how to create a agentic rag"))
 

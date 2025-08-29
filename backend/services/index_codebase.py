@@ -130,7 +130,7 @@ def find_and_show_chunks():
                 continue
             print(f"Indexing {fname} ({len(chunks)} chunks)")
             for code_chunk, start, end in chunks:
-                emb = embed(code_chunk)
+                emb = embed(f"FilePath:{file_path},code:"+code_chunk)
                 if emb is None:
                     print(f"Couldn't create emebedding for chunk of file path-:{file_path}")
                     continue
