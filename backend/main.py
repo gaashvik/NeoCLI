@@ -7,7 +7,8 @@ from .UI import terminal
 from .core.agent import workflow
 from .core.tools import shell
 import os
-
+import pexpect
+from .core.error_handling_agent import graph
 # Persistent file path
 history_file = os.path.expanduser(f"{config.META_DIR}/.neocli/.neocli_history")
 
@@ -32,25 +33,51 @@ session = PromptSession(
     completer=completer,
     enable_history_search=True
 )
+
+
+
 def repl():
     print("\n AI Shell Copilot (Approval Mode)")
     print("Type ':exit' to quit\n")
+    auto=1
 
     while True:
         try:
             user_input = session.prompt("💬 > ")
-
             if user_input.strip() == ":exit":
                 print("👋 Exiting...")
                 break
 
-            
+            if (user_input.strip() == "::manual"):
+                print("Entered Manual Exec Mode.")
+                auto=0
+                continue
+            if (user_input.strip() == "::auto"):
+                print("Entered Manual Exec Mode.")
+                try:
+                    while True:
+                        shell.shell.read_nonblocking(size=1024, timeout=0.1)
+                except pexpect.exceptions.TIMEOUT:
+                    pass
+                auto=1
+                continue
 
-            messages = [HumanMessage(content=user_input)]
-            thread_config = {"configurable": {"thread_id": "some_id"}}
-            input_state = {"messages": messages}
-            terminal.stream_workflow(input_state,thread_config,workflow)
-            
+
+            if (auto == 1):
+                messages = [HumanMessage(content=user_input)]
+                thread_config = {"configurable": {"thread_id": "some_id"}}
+                input_state = {"messages": messages}
+                terminal.stream_workflow(input_state,thread_config,workflow)
+            else:
+                error_c,text=shell.run_and_stream(user_input)
+                if (error_c!=0):
+                    print("here is the output:",text)
+                    answer=input(f"[NEO] you must have encountered an error (code:{error_c}) would you like to get some suggestions on how to resolve it? (y/n) >>")
+                    if (answer == 'y'):
+                        messages = [HumanMessage(content=text)]
+                        thread_config = {"configurable": {"thread_id": "some_id_2"}}
+                        input_state = {"messages": messages}
+                        terminal.stream_workflow(input_state,thread_config,graph)
 
         except KeyboardInterrupt:
             print("\n⏹️ Interrupted.")

@@ -2,6 +2,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENTERY_SCRIPT="$(realpath "$SCRIPT_DIR/../backend/main.py")"
 INDEX_SCRIPT="$(realpath "$SCRIPT_DIR/../backend.services.index_codebase")"
+VENV_PYTHON="$SCRIPT_DIR/../.venv/bin/python"
 source "$SCRIPT_DIR/helper.sh"
 
 enforce_histfile_size() {
@@ -11,6 +12,7 @@ function neo() {
    local subcommand=$1
     shift
     local meta_dir
+    local cwd="$PWD"
     meta_dir=$(search_for_metadata_dir)
 
     if [[ -n "$meta_dir" ]]; then
@@ -47,7 +49,7 @@ EOF
 
 
         shell)
-        PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.main "$meta_dir" 
+        PYTHONPATH="${SCRIPT_DIR}/.." "$VENV_PYTHON" -m backend.main "$meta_dir" "$cwd"
 
     ;;
 
@@ -63,7 +65,7 @@ EOF
 
    
     index)
-    PYTHONPATH="${SCRIPT_DIR}/.." python -m backend.services.index_codebase "$meta_dir"
+    PYTHONPATH="${SCRIPT_DIR}/.." "$VENV_PYTHON" -m backend.services.index_codebase "$meta_dir" "$cwd"
     ;;
     *)
 
