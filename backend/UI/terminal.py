@@ -103,7 +103,7 @@ def stream_workflow(input_state,thread_config,workflow):
 
     # Handle tool call interruptions
     while snapshot.next:
-        user_input = input("Approve tool call? (y/n): ").strip().lower()
+        user_input = input("Approve tool call? (yes(y) / no(n) / edit(e) / feedback(f) ): ").strip().lower()
 
         if user_input == "y":
             ev=workflow.stream(Command(resume=[{"type": "accept"}]), thread_config,stream="values")
@@ -116,24 +116,45 @@ def stream_workflow(input_state,thread_config,workflow):
                         messages = value.get("messages", [])
                         for msg in messages:
                             rich_pretty_print_message(msg)
+        elif user_input == "e":
+            argument=input("Please enter the input you want to be run by the tool : ")
+            ev=workflow.stream(Command(resume=[{"type":"edit","args":{"args":argument}}]),thread_config,stream="values")
+            for event in ev:
+                for key, value in event.items():
+                    if key == "__interrupt__":
+                        continue
+                    else:
+                        # value should be a dict with a 'messages' list
+                        messages = value.get("messages", [])
+                        for msg in messages:
+                            rich_pretty_print_message(msg)
+        elif user_input == "f":
+            feedback=input("Please input your feedback : ")
+            ev=workflow.stream(Command(resume=[{"type":"response","args":feedback}]),thread_config,stream="values")
+            for event in ev:
+                    for key, value in event.items():
+                        if key == "__interrupt__":
+                            continue
+                        else:
+                            # value should be a dict with a 'messages' list
+                            messages = value.get("messages", [])
+                            for msg in messages:
+                                rich_pretty_print_message(msg)
+        elif user_input == "n":
+            ev=workflow.stream(Command(resume=[{"type":"reject"}]),thread_config,stream="values")
+            for event in ev:
+                    for key, value in event.items():
+                        if key == "__interrupt__":
+                            continue
+                        else:
+                            messages = value.get("messages", [])
+                            for msg in messages:
+                                rich_pretty_print_message(msg)
         else:
-            tool_call_id = snapshot.values["messages"][-1].tool_calls[0]["id"]
-            workflow.invoke(
-                {
-                    "messages": [
-                        ToolMessage(
-                            tool_call_id=tool_call_id,
-                            content=f"Tool call denied by user. Reason: '{user_input}'"
-                        )
-                    ]
-                },
-                thread_config
-            )
+            print("Wrong input please try again.")
+             
 
-        # Refresh state after invoke
         snapshot = workflow.get_state(thread_config)
-        # message=snapshot.values.get("messages")[-1]
-        # message.pretty_print()
 
 if __name__ == "__main__":
      stream_workflow("msg",None,None)
