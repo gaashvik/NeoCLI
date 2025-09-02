@@ -6,9 +6,9 @@ To set up the project, follow these steps:
 
 1. Download and extract the latest release:
    ```bash
-   wget https://github.com/gaashvik/sentinal-ai/archive/refs/tags/v1.0.1.tar.gz
-   tar -xzf v1.0.1.tar.gz
-   cd sentinal-ai-1.0.1 # Adjust directory name if different
+   wget https://github.com/gaashvik/sentinal-ai/archive/refs/tags/v1.0.3.tar.gz
+   tar -xzf v1.0.3.tar.gz
+   cd NeoCLI-1.0.3 # Adjust directory name if different
    ```
 
 2. Run the installation script:
