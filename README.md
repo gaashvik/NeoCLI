@@ -4,11 +4,12 @@ This project requires Python 3.
 
 To set up the project, follow these steps:
 
-1. Download the installation script:
+1. Download and extract the latest release:
    ```bash
-   wget https://raw.githubusercontent.com/your-repo/your-project/main/install.sh
+   wget https://github.com/gaashvik/sentinal-ai/archive/refs/tags/v1.0.1.tar.gz
+   tar -xzf v1.0.1.tar.gz
+   cd sentinal-ai-1.0.1 # Adjust directory name if different
    ```
-   (Note: You'll need to replace `https://raw.githubusercontent.com/your-repo/your-project/main/install.sh` with the actual URL to your `install.sh` script.)
 
 2. Run the installation script:
    ```bash
