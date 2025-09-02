@@ -47,7 +47,7 @@ def add_human_in_the_loop(
             tool_response = tool.invoke(tool_input, config)
         # respond to the LLM with user feedback
         elif response["type"] == "response":
-            user_feedback = "The user has responded to the previous tool call with this interrupt and would now like this feedback to be incorporated in the tool call NOTE: the tool call has not been invoked, first make the appropriate changes and try again.",response["args"]
+            user_feedback = "The user has responded to the previous tool call with this interrupt and would now like this feedback to be incorporated in the tool call NOTE: the tool call has not been invoked, first make the appropriate changes and try again.\n[USER RESPONSE]:",response["args"]
             tool_response = user_feedback
         elif response["type"] == "reject":
             tool_response = "The User has rejected the tool call. Please think of another way. NOTE: this is a HUMAN IN THE LOOP ROUTINE"

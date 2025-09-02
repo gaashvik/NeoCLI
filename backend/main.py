@@ -6,7 +6,9 @@ from langchain_core.messages import HumanMessage
 from .UI import terminal
 from .core.agent import workflow
 from .core.tools import shell
-import os
+import os 
+import sys
+import traceback
 import pexpect
 from .core.error_handling_agent import graph
 # Persistent file path
@@ -62,7 +64,7 @@ def repl():
                 auto=1
                 continue
 
-
+            
             if (auto == 1):
                 messages = [HumanMessage(content=user_input)]
                 thread_config = {"configurable": {"thread_id": "some_id"}}
@@ -85,6 +87,9 @@ def repl():
             print("\n👋 Exiting (EOF).")
             break
         except Exception as e:
+            print("Workflow failed",e)
+            traceback.print_exc()
+            sys.exit(1)
             print(f"❌ Error: {e}")
 
     # Save history
