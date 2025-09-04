@@ -55,8 +55,11 @@ class GitHubToolset:
 
 
     def create_PR(self,source_branch:str,target_branch:str,title:str=None,description:str=None):
-        pr=self.repo.create_pull(head=source_branch,base=target_branch,title=title,body=description)
-        return f"PR created successfully: {pr.html_url}"
+        try:
+            pr=self.repo.create_pull(head=source_branch,base=target_branch,title=title,body=description)
+            return f"PR created successfully: {pr.html_url}"
+        except Exception as e:
+            return f"the pr request failed due to the following error:{e}"
 
 
         
