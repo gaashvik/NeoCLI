@@ -7,3 +7,4 @@ bash-build/
 .neocli/
 .env
 test/
+**/*.pem

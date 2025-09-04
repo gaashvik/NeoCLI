@@ -122,7 +122,7 @@ def file_creator(relative_path: str, content: str = ""):
 
     # Check if file already exists
     if os.path.exists(path):
-        raise FileExistsError(f"File already exists: {path}")
+        return (f"File already exists: {path}")
     
     # Create parent directories if they don’t exist
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -242,4 +242,5 @@ tool_list=[interupt.add_human_in_the_loop(run_shell_command),retrieve_context,ge
 error_tool_list=[retrieve_context]
 if __name__ == "__main__":
     print(web_crawl_based_on_url("https://langchain-ai.github.io/langgraph/","Fetch results for how to create a agentic rag"))
+
 
