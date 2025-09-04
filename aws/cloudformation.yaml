@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: \'2010-09-09\'
+Description: ETL Pipeline with S3, Lambda, and EventBridge
+
+Parameters:
+  SourceBucketName:
+    Type: String
+    Description: Name of the S3 bucket where raw CSV files will be uploaded.
+  DestinationBucketName:
+    Type: String
+    Description: Name of the S3 bucket where processed JSON data will be stored.
+  ProjectName:
+    Type: String
+    Description: A name for the project to be used in resource naming.
+    Default: ETLExample
+
+Resources:
+  # S3 Buckets
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref SourceBucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt ExtractorLambdaFunction.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref DestinationBucketName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # IAM Roles
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: \'2012-10-17\'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaS3Access
+          PolicyDocument:
+            Version: \'2012-10-17\'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Join [\'\', [\'arn:aws:s3:::\', !Ref SourceBucketName, \'/*\']]
+                  - !Join [\'\', [\'arn:aws:s3:::\', !Ref DestinationBucketName, \'/*\']]
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt TransformerLambdaFunction.Arn
+                  - !GetAtt LoaderLambdaFunction.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Lambda Functions
+  ExtractorLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [\'-\', [!Ref ProjectName, \'ExtractorLambda\']]
+      Handler: extractor.lambda_handler
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          # Author: Shubhk
+          import os
+          import json
+          import csv
+          import boto3
+
+          s3 = boto3.client(\'s3\')
+          lambda_client = boto3.client(\'lambda\')
+
+          TRANSFORMER_LAMBDA_NAME = os.environ.get(\'TRANSFORMER_LAMBDA_NAME\')
+
+          def lambda_handler(event, context):\
+              print("Extractor Lambda triggered by event:", json.dumps(event))
+
+              for record in event[\'Records\']:\
+                  bucket_name = record[\'s3\'][\'bucket\'][\'name\']
+                  file_key = record[\'s3\'][\'object\'][\'key\']
+
+                  print(f"Processing file {file_key} from bucket {bucket_name}")
+
+                  try:\
+                      response = s3.get_object(Bucket=bucket_name, Key=file_key)
+                      csv_content = response[\'Body\'].read().decode(\'utf-8\')
+
+                      lines = csv_content.strip().split(\'\\n\')
+                      csv_reader = csv.reader(lines)
+                      header = next(csv_reader)
+
+                      data_to_transform = []
+                      for i, row in enumerate(csv_reader):\
+                          if row:
+                              item = {\
+                                  \'id\': row[0],\
+                                  \'name\': row[1],\
+                                  \'value\': int(row[2])
+                              }
+                              data_to_transform.append(item)
+
+                      print(f"Extracted {len(data_to_transform)} items. Invoking Transformer Lambda.")
+
+                      if TRANSFORMER_LAMBDA_NAME:
+                          lambda_client.invoke(\
+                              FunctionName=TRANSFORMER_LAMBDA_NAME,\
+                              InvocationType=\'Event\',\
+                              Payload=json.dumps(data_to_transform)\
+                          )
+                          print(f"Successfully invoked Transformer Lambda: {TRANSFORMER_LAMBDA_NAME}")
+                      else:\
+                          print("TRANSFORMER_LAMBDA_NAME environment variable not set. Skipping invocation.")
+
+                  except Exception as e:\
+                      print(f"Error processing file {file_key}: {e}")
+                      raise e
+
+              return {\
+                  \'statusCode\': 200,\
+                  \'body\': json.dumps(\'Extractor Lambda finished processing.\')
+              }
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TRANSFORMER_LAMBDA_NAME: !GetAtt TransformerLambdaFunction.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  TransformerLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [\'-\', [!Ref ProjectName, \'TransformerLambda\']]
+      Handler: transformer.lambda_handler
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          # Author: Shubhk
+          import os
+          import json
+          import boto3
+
+          lambda_client = boto3.client(\'lambda\')
+
+          LOADER_LAMBDA_NAME = os.environ.get(\'LOADER_LAMBDA_NAME\')
+
+          def lambda_handler(event, context):\
+              print("Transformer Lambda triggered by event:", json.dumps(event))
+
+              transformed_data = []
+              for item in event:\
+                  item[\'transformed_at\'] = os.environ.get(\'CURRENT_TIMESTAMP\', \'N/A\')
+                  item[\'status\'] = \'processed\'
+                  transformed_data.append(item)
+
+              print(f"Transformed {len(transformed_data)} items. Invoking Loader Lambda.")
+
+              if LOADER_LAMBDA_NAME:
+                  lambda_client.invoke(\
+                      FunctionName=LOADER_LAMBDA_NAME,\
+                      InvocationType=\'Event\',\
+                      Payload=json.dumps(transformed_data)\
+                  )
+                  print(f"Successfully invoked Loader Lambda: {LOADER_LAMBDA_NAME}")
+              else:\
+                  print("LOADER_LAMBDA_NAME environment variable not set. Skipping invocation.")
+
+              return {\
+                  \'statusCode\': 200,\
+                  \'body\': json.dumps(\'Transformer Lambda finished processing.\')
+              }
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          LOADER_LAMBDA_NAME: !GetAtt LoaderLambdaFunction.Arn
+          CURRENT_TIMESTAMP: !Sub \'${AWS::StackName}-${AWS::Region}\' # Example placeholder
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  LoaderLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [\'-\', [!Ref ProjectName, \'LoaderLambda\']]
+      Handler: loader.lambda_handler
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          # Author: Shubhk
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client(\'s3\')
+
+          DESTINATION_BUCKET_NAME = os.environ.get(\'DESTINATION_BUCKET_NAME\')
+
+          def lambda_handler(event, context):\
+              print("Loader Lambda triggered by event:", json.dumps(event))
+
+              if event:\
+                  print(f"Received {len(event)} items to load.")
+                  if DESTINATION_BUCKET_NAME:
+                      output_file_key = f"processed_data/{context.aws_request_id}.json"
+                      try:\
+                          s3.put_object(\
+                              Bucket=DESTINATION_BUCKET_NAME,\
+                              Key=output_file_key,\
+                              Body=json.dumps(event, indent=2),\
+                              ContentType=\'application/json\'
+                          )
+                          print(f"Successfully loaded data to s3://{DESTINATION_BUCKET_NAME}/{output_file_key}")
+                      except Exception as e:\
+                          print(f"Error writing to S3 bucket {DESTINATION_BUCKET_NAME}: {e}")
+                          raise e
+                  else:\
+                      print("DESTINATION_BUCKET_NAME environment variable not set. Skipping S3 write.")
+
+              return {\
+                  \'statusCode\': 200,\
+                  \'body\': json.dumps(\'Loader Lambda finished processing.\')
+              }
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DESTINATION_BUCKET_NAME: !Ref DestinationBucketName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Permissions for S3 to invoke Lambda
+  ExtractorLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ExtractorLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref "AWS::AccountId"
+      SourceArn: !Join [\'\', [\'arn:aws:s3:::\', !Ref SourceBucketName]]
+      
+Outputs:
+  SourceBucket:
+    Description: "S3 Bucket for raw data ingestion"
+    Value: !Ref SourceBucket
+  DestinationBucket:
+    Description: "S3 Bucket for processed data"
+    Value: !Ref DestinationBucket
+  ExtractorLambdaArn:
+    Description: "ARN of the Extractor Lambda Function"
+    Value: !GetAtt ExtractorLambdaFunction.Arn
+  TransformerLambdaArn:
+    Description: "ARN of the Transformer Lambda Function"
+    Value: !GetAtt TransformerLambdaFunction.Arn
+  LoaderLambdaArn:
+    Description: "ARN of the Loader Lambda Function"
+    Value: !GetAtt LoaderLambdaFunction.Arn
