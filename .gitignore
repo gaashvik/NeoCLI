@@ -7,3 +7,5 @@ bash-build/
 .neocli/
 .env
 test/
+neocli-app.2025-08-13.private-key.pem
+test.py
