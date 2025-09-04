@@ -1,0 +1,32 @@
+
+# Author: Shubhk
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - echo "Installing dependencies..."
+      - pip install awscli
+
+  build:
+    commands:
+      - echo "Packaging Lambda functions..."
+      # CloudFormation will deploy the inline code, so no explicit packaging for zip files is needed here.
+      # For larger projects, you would zip the lambda code and upload to S3, then reference the S3 key in the CF template.
+      - echo "Deploying CloudFormation stack..."
+      - |
+        aws cloudformation deploy \
+          --template-file aws/cloudformation_template.yaml \
+          --stack-name SentinalAI-ETL-Stack \
+          --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+          --parameter-overrides \
+            ProjectName=SentinalAI-ETL \
+            SourceBucketName=sentinal-ai-etl-source \
+            TargetBucketName=sentinal-ai-etl-output
+
+  post_build:
+    commands:
+      - echo "Deployment complete!"
+

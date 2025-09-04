@@ -1,0 +1,16 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - pip install --upgrade awscli
+  build:
+    commands:
+      - echo "Starting CloudFormation deployment..."
+      - aws cloudformation deploy \
+          --template-file aws/cloudformation.yaml \
+          --stack-name ETLExampleStack \
+          --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+          --no-fail-on-empty-changeset

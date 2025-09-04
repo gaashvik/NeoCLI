@@ -1,0 +1,383 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS ETL Application with S3, Lambda, and EventBridge
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ETLExample
+    Description: Name of the project.
+
+Resources:
+  # S3 Buckets
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ProjectName}-source-bucket-${AWS::AccountId}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  StagingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ProjectName}-staging-bucket-${AWS::AccountId}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ProjectName}-processed-bucket-${AWS::AccountId}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # IAM Roles for Lambda Functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${ProjectName}-source-bucket-${AWS::AccountId}/*
+                  - !Sub arn:aws:s3:::${ProjectName}-staging-bucket-${AWS::AccountId}/*
+                  - !Sub arn:aws:s3:::${ProjectName}-processed-bucket-${AWS::AccountId}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${ProjectName}-source-bucket-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::${ProjectName}-staging-bucket-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::${ProjectName}-processed-bucket-${AWS::AccountId}
+        - PolicyName: EventBridgePublishPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: '*' # EventBridge is a global service, but events are regional
+
+  # Lambda Function 1: Data Ingestion
+  IngestionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-IngestionLambda
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client('s3')
+          eventbridge = boto3.client('events')
+
+          SOURCE_BUCKET = os.environ.get('SOURCE_BUCKET')
+          STAGING_BUCKET = os.environ.get('STAGING_BUCKET')
+          EVENT_BUS_NAME = os.environ.get('EVENT_BUS_NAME')
+
+          def handler(event, context):
+              print(f"Ingestion Lambda triggered by event: {json.dumps(event)}")
+              
+              for record in event['Records']:
+                  bucket_name = record['s3']['bucket']['name']
+                  object_key = record['s3']['object']['key']
+                  
+                  try:
+                      # 1. Read data from source S3
+                      response = s3.get_object(Bucket=bucket_name, Key=object_key)
+                      file_content = response['Body'].read().decode('utf-8')
+                      print(f"Read content from s3://{bucket_name}/{object_key}")
+                      
+                      # 2. Perform initial validation (simple example: check if content is not empty)
+                      if not file_content.strip():
+                          print(f"Skipping empty file: {object_key}")
+                          continue
+
+                      # 3. Store in staging S3
+                      staging_key = f"raw/{object_key}"
+                      s3.put_object(Bucket=STAGING_BUCKET, Key=staging_key, Body=file_content)
+                      print(f"Moved s3://{bucket_name}/{object_key} to s3://{STAGING_BUCKET}/{staging_key}")
+                      
+                      # 4. Publish event to EventBridge
+                      eventbridge.put_events(
+                          Entries=[
+                              {
+                                  'Source': 'com.example.etl',
+                                  'DetailType': 'DataIngested',
+                                  'EventBusName': EVENT_BUS_NAME,
+                                  'Detail': json.dumps({
+                                      'bucket': STAGING_BUCKET,
+                                      'key': staging_key,
+                                      'original_key': object_key
+                                  })
+                              }
+                          ]
+                      )
+                      print(f"Published DataIngested event for {staging_key}")
+
+                  except Exception as e:
+                      print(f"Error processing s3://{bucket_name}/{object_key}: {e}")
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Ingestion complete!')
+              }
+      Environment:
+        Variables:
+          SOURCE_BUCKET: !Ref SourceBucket
+          STAGING_BUCKET: !Ref StagingBucket
+          EVENT_BUS_NAME: !Ref CustomEventBus
+      MemorySize: 128
+      Timeout: 30
+
+  # S3 Event Trigger for Ingestion Lambda
+  S3LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt IngestionLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt SourceBucket.Arn
+
+  SourceBucketNotification:
+    Type: AWS::S3::BucketNotification
+    Properties:
+      Bucket: !Ref SourceBucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt IngestionLambda.Arn
+
+  # Custom EventBus
+  CustomEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${ProjectName}-EventBus
+
+  # Lambda Function 2: Data Transformation
+  TransformationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-TransformationLambda
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client('s3')
+          eventbridge = boto3.client('events')
+
+          STAGING_BUCKET = os.environ.get('STAGING_BUCKET')
+          PROCESSED_BUCKET = os.environ.get('PROCESSED_BUCKET')
+          EVENT_BUS_NAME = os.environ.get('EVENT_BUS_NAME')
+
+          def handler(event, context):
+              print(f"Transformation Lambda triggered by event: {json.dumps(event)}")
+              
+              detail = event['detail']
+              bucket_name = detail['bucket']
+              object_key = detail['key'] # This is the key in the staging bucket
+              original_key = detail['original_key'] # Original key from source for reference
+
+              try:
+                  # 1. Read data from staging S3
+                  response = s3.get_object(Bucket=bucket_name, Key=object_key)
+                  file_content = response['Body'].read().decode('utf-8')
+                  print(f"Read content from s3://{bucket_name}/{object_key}")
+
+                  # 2. Perform transformation (simple example: convert to uppercase and add a timestamp)
+                  transformed_content = file_content.upper() + f"\nTransformed at: {event['time']}"
+                  print("Content transformed.")
+
+                  # 3. Store transformed data in processed S3
+                  processed_key = f"transformed/{original_key.replace('.txt', '_transformed.txt')}" # Assuming .txt files
+                  s3.put_object(Bucket=PROCESSED_BUCKET, Key=processed_key, Body=transformed_content)
+                  print(f"Stored transformed data to s3://{PROCESSED_BUCKET}/{processed_key}")
+                  
+                  # 4. Publish event to EventBridge
+                  eventbridge.put_events(
+                      Entries=[
+                          {
+                              'Source': 'com.example.etl',
+                              'DetailType': 'DataTransformed',
+                              'EventBusName': EVENT_BUS_NAME,
+                              'Detail': json.dumps({
+                                  'bucket': PROCESSED_BUCKET,
+                                  'key': processed_key,
+                                  'original_key': original_key
+                              })
+                          }
+                      ]
+                  )
+                  print(f"Published DataTransformed event for {processed_key}")
+
+              except Exception as e:
+                  print(f"Error processing s3://{bucket_name}/{object_key}: {e}")
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Transformation complete!')
+              }
+      Environment:
+        Variables:
+          STAGING_BUCKET: !Ref StagingBucket
+          PROCESSED_BUCKET: !Ref ProcessedBucket
+          EVENT_BUS_NAME: !Ref CustomEventBus
+      MemorySize: 128
+      Timeout: 30
+
+  # EventBridge Rule for Transformation Lambda
+  TransformationRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref CustomEventBus
+      EventPattern:
+        source:
+          - com.example.etl
+        detail-type:
+          - DataIngested
+      Targets:
+        - Arn: !GetAtt TransformationLambda.Arn
+          Id: TransformationLambdaTarget
+
+  TransformationLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TransformationLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TransformationRule.Arn
+      EventSourceToken: !Sub ${ProjectName}-TransformationRule-${AWS::Region} # Unique token for rule
+
+  # Lambda Function 3: Data Loading
+  LoadingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-LoadingLambda
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client('s3')
+
+          PROCESSED_BUCKET = os.environ.get('PROCESSED_BUCKET')
+          # In a real scenario, this lambda would load data into a database, data warehouse, etc.
+
+          def handler(event, context):
+              print(f"Loading Lambda triggered by event: {json.dumps(event)}")
+              
+              detail = event['detail']
+              bucket_name = detail['bucket']
+              object_key = detail['key'] # This is the key in the processed bucket
+              original_key = detail['original_key'] # Original key from source for reference
+
+              try:
+                  # 1. Read data from processed S3
+                  response = s3.get_object(Bucket=bucket_name, Key=object_key)
+                  file_content = response['Body'].read().decode('utf-8')
+                  print(f"Read content from s3://{bucket_name}/{object_key}")
+
+                  # 2. Simulate loading data to a target system
+                  # For this example, we'll just print it and potentially move it to a final archive
+                  print(f"Simulating loading of data for {object_key}:\n{file_content[:200]}...") # Print first 200 chars
+                  
+                  # Example: move to an archive folder within the processed bucket or another S3
+                  archive_key = f"archive/{object_key.split('/')[-1]}"
+                  s3.copy_object(
+                      Bucket=PROCESSED_BUCKET,
+                      CopySource={'Bucket': bucket_name, 'Key': object_key},
+                      Key=archive_key
+                  )
+                  s3.delete_object(Bucket=bucket_name, Key=object_key) # Clean up processed file
+                  print(f"Archived {object_key} to {archive_key} and deleted original.")
+
+              except Exception as e:
+                  print(f"Error processing s3://{bucket_name}/{object_key}: {e}")
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Loading complete!')
+              }
+      Environment:
+        Variables:
+          PROCESSED_BUCKET: !Ref ProcessedBucket
+      MemorySize: 128
+      Timeout: 30
+
+  # EventBridge Rule for Loading Lambda
+  LoadingRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref CustomEventBus
+      EventPattern:
+        source:
+          - com.example.etl
+        detail-type:
+          - DataTransformed
+      Targets:
+        - Arn: !GetAtt LoadingLambda.Arn
+          Id: LoadingLambdaTarget
+
+  LoadingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LoadingLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt LoadingRule.Arn
+      EventSourceToken: !Sub ${ProjectName}-LoadingRule-${AWS::Region} # Unique token for rule
+
+Outputs:
+  SourceBucketName:
+    Description: Name of the S3 bucket for raw data.
+    Value: !Ref SourceBucket
+  StagingBucketName:
+    Description: Name of the S3 bucket for staging data.
+    Value: !Ref StagingBucket
+  ProcessedBucketName:
+    Description: Name of the S3 bucket for processed data.
+    Value: !Ref ProcessedBucket
+  IngestionLambdaFunctionName:
+    Description: Name of the Ingestion Lambda Function.
+    Value: !Ref IngestionLambda
+  TransformationLambdaFunctionName:
+    Description: Name of the Transformation Lambda Function.
+    Value: !Ref TransformationLambda
+  LoadingLambdaFunctionName:
+    Description: Name of the Loading Lambda Function.
+    Value: !Ref LoadingLambda
+  EventBusName:
+    Description: Name of the Custom EventBridge Event Bus.
+    Value: !Ref CustomEventBus

@@ -1,0 +1,267 @@
+
+# Author: Shubhk
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ETL Pipeline with S3, Lambda, and EventBridge
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: SentinalAI-ETL
+    Description: Name of the project.
+  SourceBucketName:
+    Type: String
+    Description: Name of the S3 bucket where source CSV files will be uploaded.
+    Default: sentinal-ai-etl-source
+  TargetBucketName:
+    Type: String
+    Description: Name of the S3 bucket where processed JSON files will be stored.
+    Default: sentinal-ai-etl-output
+
+Resources:
+  # S3 Buckets
+  SourceS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref SourceBucketName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  TargetS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref TargetBucketName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # IAM Roles for Lambda Functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Join [ '', [ 'arn:aws:s3:::', !Ref SourceS3Bucket, '/*' ] ]
+                  - !Join [ '', [ 'arn:aws:s3:::', !Ref TargetS3Bucket, '/*' ] ]
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Join [ '', [ 'arn:aws:s3:::', !Ref SourceS3Bucket ] ]
+                  - !Join [ '', [ 'arn:aws:s3:::', !Ref TargetS3Bucket ] ]
+
+  # Lambda Functions
+  ExtractLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [ '-', [ !Ref ProjectName, 'ExtractLambda' ] ]
+      Handler: extract_lambda.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import csv
+
+          s3 = boto3.client('s3')
+
+          def handler(event, context):
+              bucket_name = event['Records'][0]['s3']['bucket']['name']
+              file_key = event['Records'][0]['s3']['object']['key']
+
+              print(f"Extracting data from s3://{bucket_name}/{file_key}")
+
+              response = s3.get_object(Bucket=bucket_name, Key=file_key)
+              content = response['Body'].read().decode('utf-8')
+              
+              lines = content.strip().split('\n')
+              reader = csv.DictReader(lines)
+              
+              extracted_data = []
+              for row in reader:
+                  extracted_data.append(row)
+
+              print(f"Extracted {len(extracted_data)} records.")
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps(extracted_data)
+              }
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          TARGET_BUCKET_NAME: !Ref TargetBucketName
+
+  TransformLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [ '-', [ !Ref ProjectName, 'TransformLambda' ] ]
+      Handler: transform_lambda.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          # Author: Shubhk
+          import json
+
+          def handler(event, context):
+              extracted_data = json.loads(event['body'])
+
+              print(f"Transforming {len(extracted_data)} records.")
+
+              transformed_data = []
+              for record in extracted_data:
+                  try:
+                      record['value'] = int(record['value'])
+                      transformed_data.append(record)
+                  except (ValueError, KeyError) as e:
+                      print(f"Skipping record due to transformation error: {record} - {e}")
+
+              print(f"Transformed {len(transformed_data)} records.")
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps(transformed_data)
+              }
+      Timeout: 30
+      MemorySize: 128
+
+  LoadLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [ '-', [ !Ref ProjectName, 'LoadLambda' ] ]
+      Handler: load_lambda.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          # Author: Shubhk
+          import json
+          import boto3
+
+          s3 = boto3.client('s3')
+
+          def handler(event, context):
+              transformed_data = json.loads(event['body'])
+
+              target_bucket_name = 'sentinal-ai-etl-output'  # This should ideally come from environment variables or parameters
+              output_file_key = 'processed_data.json'
+
+              print(f"Loading {len(transformed_data)} records to s3://{target_bucket_name}/{output_file_key}")
+
+              try:
+                  s3.put_object(
+                      Bucket=target_bucket_name,
+                      Key=output_file_key,
+                      Body=json.dumps(transformed_data, indent=2),
+                      ContentType='application/json'
+                  )
+                  print("Data loaded successfully.")
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Data loaded successfully'})
+                  }
+              except Exception as e:
+                  print(f"Error loading data to S3: {e}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'message': f'Error loading data: {e}'})
+                  }
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          TARGET_BUCKET_NAME: !Ref TargetBucketName
+
+  # EventBridge Rule to trigger the ETL pipeline
+  S3TriggerEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - s3.amazonaws.com
+          eventName:
+            - PutObject
+          requestParameters:
+            bucketName:
+              - !Ref SourceS3Bucket
+            key:
+              - !Suffix '' # Matches any object key
+      Targets:
+        - Arn: !GetAtt ExtractLambdaFunction.Arn
+          Id: ExtractLambdaTarget
+
+  # Permissions for EventBridge to invoke Lambda
+  ExtractLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ExtractLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt S3TriggerEventRule.Arn
+
+  # Permissions for Lambda to invoke subsequent Lambdas (via EventBridge or direct)
+  # For simplicity, we'll use direct invocation from one lambda to another for this example
+  # In a real-world scenario, you might use Step Functions for orchestration or EventBridge for decoupled events.
+  # For this example, we'll assume the output of one lambda is directly passed as input to the next.
+  # This requires the calling lambda to have invoke permissions on the next lambda.
+
+  # Add permissions for ExtractLambda to invoke TransformLambda
+  ExtractLambdaToTransformLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TransformLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: lambda.amazonaws.com
+      SourceArn: !GetAtt ExtractLambdaFunction.Arn # Source is the ARN of the calling Lambda
+
+  # Add permissions for TransformLambda to invoke LoadLambda
+  TransformLambdaToLoadLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LoadLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: lambda.amazonaws.com
+      SourceArn: !GetAtt TransformLambdaFunction.Arn # Source is the ARN of the calling Lambda
+
+Outputs:
+  SourceBucketName:
+    Description: Name of the S3 bucket for source files
+    Value: !Ref SourceS3Bucket
+  TargetBucketName:
+    Description: Name of the S3 bucket for processed files
+    Value: !Ref TargetS3Bucket
+  ExtractLambdaFunctionName:
+    Description: Name of the Extract Lambda Function
+    Value: !Ref ExtractLambdaFunction
+  TransformLambdaFunctionName:
+    Description: Name of the Transform Lambda Function
+    Value: !Ref TransformLambdaFunction
+  LoadLambdaFunctionName:
+    Description: Name of the Load Lambda Function
+    Value: !Ref LoadLambdaFunction
