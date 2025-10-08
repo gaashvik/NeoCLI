@@ -1,0 +1,249 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ETL Pipeline for CSV processing using Lambda, SQS, and S3
+
+Resources:
+  # S3 Buckets
+  RawCSVS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub etl-raw-csv-bucket-${AWS::AccountId}
+
+  ProcessedDataS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub etl-processed-data-bucket-${AWS::AccountId}
+
+  # SQS Queues
+  ExtractionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: etl-extraction-queue
+
+  TransformationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: etl-transformation-queue
+
+  # IAM Roles for Lambda Functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3SQSPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt RawCSVS3Bucket.Arn
+                  - !Join ['', [!GetAtt RawCSVS3Bucket.Arn, '/*']]
+                  - !GetAtt ProcessedDataS3Bucket.Arn
+                  - !Join ['', [!GetAtt ProcessedDataS3Bucket.Arn, '/*']]
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt ExtractionQueue.Arn
+                  - !GetAtt TransformationQueue.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*
+
+  # Lambda Functions
+  ExtractorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ExtractorLambda
+      Handler: index.handler
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client('s3')
+          sqs = boto3.client('sqs')
+
+          EXTRACTION_QUEUE_URL = os.environ.get('EXTRACTION_QUEUE_URL')
+
+          def handler(event, context):
+              for record in event['Records']:
+                  bucket = record['s3']['bucket']['name']
+                  key = record['s3']['object']['key']
+                  
+                  response = s3.get_object(Bucket=bucket, Key=key)
+                  content = response['Body'].read().decode('utf-8')
+                  
+                  message_body = {
+                      'bucket': bucket,
+                      'key': key,
+                      'content': content
+                  }
+                  
+                  sqs.send_message(
+                      QueueUrl=EXTRACTION_QUEUE_URL,
+                      MessageBody=json.dumps(message_body)
+                  )
+                  
+                  print(f"Sent message for {key} to SQS.")
+              return {'statusCode': 200, 'body': json.dumps('Extraction complete!')}
+      Environment:
+        Variables:
+          EXTRACTION_QUEUE_URL: !Ref ExtractionQueue
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 128
+      Timeout: 30
+
+  TransformerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TransformerLambda
+      Handler: index.handler
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import csv
+          from io import StringIO
+
+          sqs = boto3.client('sqs')
+
+          TRANSFORMATION_QUEUE_URL = os.environ.get('TRANSFORMATION_QUEUE_URL')
+
+          def handler(event, context):
+              for record in event['Records']:
+                  message_body = json.loads(record['body'])
+                  csv_content = message_body['content']
+                  
+                  # Transform CSV to JSON
+                  data = []
+                  csv_file = StringIO(csv_content)
+                  csv_reader = csv.DictReader(csv_file)
+                  for row in csv_reader:
+                      data.append(row)
+                  
+                  transformed_data = json.dumps(data)
+                  
+                  message_body['content'] = transformed_data
+                  
+                  sqs.send_message(
+                      QueueUrl=TRANSFORMATION_QUEUE_URL,
+                      MessageBody=json.dumps(message_body)
+                  )
+                  
+                  print(f"Transformed data and sent to SQS for {message_body['key']}.")
+              return {'statusCode': 200, 'body': json.dumps('Transformation complete!')}
+      Environment:
+        Variables:
+          TRANSFORMATION_QUEUE_URL: !Ref TransformationQueue
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 128
+      Timeout: 30
+      Events:
+        ExtractionQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ExtractionQueue.Arn
+            BatchSize: 10
+
+  LoaderLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: LoaderLambda
+      Handler: index.handler
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client('s3')
+
+          PROCESSED_DATA_S3_BUCKET = os.environ.get('PROCESSED_DATA_S3_BUCKET')
+
+          def handler(event, context):
+              for record in event['Records']:
+                  message_body = json.loads(record['body'])
+                  original_key = message_body['key']
+                  processed_content = message_body['content']
+                  
+                  # Save processed data to S3
+                  processed_key = original_key.replace('.csv', '.json')
+                  s3.put_object(
+                      Bucket=PROCESSED_DATA_S3_BUCKET,
+                      Key=processed_key,
+                      Body=processed_content
+                  )
+                  
+                  print(f"Loaded {processed_key} to S3.")
+              return {'statusCode': 200, 'body': json.dumps('Loading complete!')}
+      Environment:
+        Variables:
+          PROCESSED_DATA_S3_BUCKET: !Ref ProcessedDataS3Bucket
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 128
+      Timeout: 30
+      Events:
+        TransformationQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt TransformationQueue.Arn
+            BatchSize: 10
+
+  # S3 Event for Extractor Lambda
+  S3LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ExtractorLambda.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt RawCSVS3Bucket.Arn
+
+  S3BucketNotification:
+    Type: AWS::S3::BucketNotification
+    Properties:
+      Bucket: !Ref RawCSVS3Bucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt ExtractorLambda.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .csv
+
+Outputs:
+  RawCSVS3BucketName:
+    Description: Name of the S3 bucket for raw CSV files
+    Value: !Ref RawCSVS3Bucket
+  ProcessedDataS3BucketName:
+    Description: Name of the S3 bucket for processed data
+    Value: !Ref ProcessedDataS3Bucket
+  ExtractionQueueUrl:
+    Description: URL of the SQS queue for extraction
+    Value: !Ref ExtractionQueue
+  TransformationQueueUrl:
+    Description: URL of the SQS queue for transformation
+    Value: !Ref TransformationQueue
